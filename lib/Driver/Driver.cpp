@@ -37,6 +37,7 @@
 #include "ToolChains/NetBSD.h"
 #include "ToolChains/OpenBSD.h"
 #include "ToolChains/PS4CPU.h"
+#include "ToolChains/RISCV.h"
 #include "ToolChains/Solaris.h"
 #include "ToolChains/TCE.h"
 #include "ToolChains/WebAssembly.h"
@@ -2814,7 +2815,7 @@ public:
           C.MakeAction<OffloadUnbundlingJobAction>(HostAction);
       UnbundlingHostAction->registerDependentActionInfo(
           C.getSingleOffloadToolChain<Action::OFK_Host>(),
-          /*BoundArch=*/"all", Action::OFK_Host);
+          /*BoundArch=*/StringRef(), Action::OFK_Host);
       HostAction = UnbundlingHostAction;
     }
 
@@ -3880,7 +3881,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
       StringRef Arch;
       if (TargetDeviceOffloadKind == Action::OFK_HIP) {
         if (UI.DependentOffloadKind == Action::OFK_Host)
-          Arch = "all";
+          Arch = StringRef();
         else
           Arch = UI.DependentBoundArch;
       } else
@@ -4410,6 +4411,10 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
         break;
       case llvm::Triple::avr:
         TC = llvm::make_unique<toolchains::AVRToolChain>(*this, Target, Args);
+        break;
+      case llvm::Triple::riscv32:
+      case llvm::Triple::riscv64:
+        TC = llvm::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
         break;
       default:
         if (Target.getVendor() == llvm::Triple::Myriad)

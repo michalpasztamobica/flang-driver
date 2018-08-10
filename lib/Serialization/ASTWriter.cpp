@@ -455,6 +455,14 @@ ASTTypeWriter::VisitDependentSizedExtVectorType(
   Code = TYPE_DEPENDENT_SIZED_EXT_VECTOR;
 }
 
+void ASTTypeWriter::VisitDependentVectorType(const DependentVectorType *T) {
+  Record.AddTypeRef(T->getElementType());
+  Record.AddStmt(const_cast<Expr*>(T->getSizeExpr()));
+  Record.AddSourceLocation(T->getAttributeLoc());
+  Record.push_back(T->getVectorKind());
+  Code = TYPE_DEPENDENT_SIZED_VECTOR;
+}
+
 void
 ASTTypeWriter::VisitDependentAddressSpaceType(
     const DependentAddressSpaceType *T) {
@@ -673,6 +681,11 @@ void TypeLocWriter::VisitDependentSizedExtVectorTypeLoc(
 }
 
 void TypeLocWriter::VisitVectorTypeLoc(VectorTypeLoc TL) {
+  Record.AddSourceLocation(TL.getNameLoc());
+}
+
+void TypeLocWriter::VisitDependentVectorTypeLoc(
+    DependentVectorTypeLoc TL) {
   Record.AddSourceLocation(TL.getNameLoc());
 }
 
@@ -3947,7 +3960,8 @@ public:
 
 bool ASTWriter::isLookupResultExternal(StoredDeclsList &Result,
                                        DeclContext *DC) {
-  return Result.hasExternalDecls() && DC->NeedToReconcileExternalVisibleStorage;
+  return Result.hasExternalDecls() &&
+         DC->hasNeedToReconcileExternalVisibleStorage();
 }
 
 bool ASTWriter::isLookupResultEntirelyExternal(StoredDeclsList &Result,
@@ -3962,8 +3976,8 @@ bool ASTWriter::isLookupResultEntirelyExternal(StoredDeclsList &Result,
 void
 ASTWriter::GenerateNameLookupTable(const DeclContext *ConstDC,
                                    llvm::SmallVectorImpl<char> &LookupTable) {
-  assert(!ConstDC->HasLazyLocalLexicalLookups &&
-         !ConstDC->HasLazyExternalLexicalLookups &&
+  assert(!ConstDC->hasLazyLocalLexicalLookups() &&
+         !ConstDC->hasLazyExternalLexicalLookups() &&
          "must call buildLookups first");
 
   // FIXME: We need to build the lookups table, which is logically const.
@@ -5241,7 +5255,7 @@ void ASTWriter::WriteDeclUpdatesBlocks(RecordDataImpl &OffsetsRecord) {
         }
         Record.push_back(RD->getTagKind());
         Record.AddSourceLocation(RD->getLocation());
-        Record.AddSourceLocation(RD->getLocStart());
+        Record.AddSourceLocation(RD->getBeginLoc());
         Record.AddSourceRange(RD->getBraceRange());
 
         // Instantiation may change attributes; write them all out afresh.
