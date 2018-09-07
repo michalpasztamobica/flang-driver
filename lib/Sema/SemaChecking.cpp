@@ -238,7 +238,8 @@ static bool SemaBuiltinOverflow(Sema &S, CallExpr *TheCall) {
 
 static void SemaBuiltinMemChkCall(Sema &S, FunctionDecl *FDecl,
                                   CallExpr *TheCall, unsigned SizeIdx,
-                                  unsigned DstSizeIdx) {
+                                  unsigned DstSizeIdx,
+                                  StringRef LikelyMacroName) {
   if (TheCall->getNumArgs() <= SizeIdx ||
       TheCall->getNumArgs() <= DstSizeIdx)
     return;
@@ -256,12 +257,21 @@ static void SemaBuiltinMemChkCall(Sema &S, FunctionDecl *FDecl,
   if (Size.ule(DstSize))
     return;
 
-  // confirmed overflow so generate the diagnostic.
-  IdentifierInfo *FnName = FDecl->getIdentifier();
+  // Confirmed overflow, so generate the diagnostic.
+  StringRef FunctionName = FDecl->getName();
   SourceLocation SL = TheCall->getBeginLoc();
-  SourceRange SR = TheCall->getSourceRange();
+  SourceManager &SM = S.getSourceManager();
+  // If we're in an expansion of a macro whose name corresponds to this builtin,
+  // use the simple macro name and location.
+  if (SL.isMacroID() && Lexer::getImmediateMacroName(SL, SM, S.getLangOpts()) ==
+                            LikelyMacroName) {
+    FunctionName = LikelyMacroName;
+    SL = SM.getImmediateMacroCallerLoc(SL);
+  }
 
-  S.Diag(SL, diag::warn_memcpy_chk_overflow) << SR << FnName;
+  S.Diag(SL, diag::warn_memcpy_chk_overflow)
+      << FunctionName << DstSize.toString(/*Radix=*/10)
+      << Size.toString(/*Radix=*/10);
 }
 
 static bool SemaBuiltinCallWithStaticChain(Sema &S, CallExpr *BuiltinCall) {
@@ -1219,21 +1229,37 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
   // check secure string manipulation functions where overflows
   // are detectable at compile time
   case Builtin::BI__builtin___memcpy_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "memcpy");
+    break;
   case Builtin::BI__builtin___memmove_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "memmove");
+    break;
   case Builtin::BI__builtin___memset_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "memset");
+    break;
   case Builtin::BI__builtin___strlcat_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "strlcat");
+    break;
   case Builtin::BI__builtin___strlcpy_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "strlcpy");
+    break;
   case Builtin::BI__builtin___strncat_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "strncat");
+    break;
   case Builtin::BI__builtin___strncpy_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "strncpy");
+    break;
   case Builtin::BI__builtin___stpncpy_chk:
-    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3);
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 2, 3, "stpncpy");
     break;
   case Builtin::BI__builtin___memccpy_chk:
-    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 3, 4);
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 3, 4, "memccpy");
     break;
   case Builtin::BI__builtin___snprintf_chk:
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 1, 3, "snprintf");
+    break;
   case Builtin::BI__builtin___vsnprintf_chk:
-    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 1, 3);
+    SemaBuiltinMemChkCall(*this, FDecl, TheCall, 1, 3, "vsnprintf");
     break;
   case Builtin::BI__builtin_call_with_static_chain:
     if (SemaBuiltinCallWithStaticChain(*this, TheCall))
@@ -3626,6 +3652,14 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_psrldqi128_byteshift:
   case X86::BI__builtin_ia32_psrldqi256_byteshift:
   case X86::BI__builtin_ia32_psrldqi512_byteshift:
+  case X86::BI__builtin_ia32_kshiftliqi:
+  case X86::BI__builtin_ia32_kshiftlihi:
+  case X86::BI__builtin_ia32_kshiftlisi:
+  case X86::BI__builtin_ia32_kshiftlidi:
+  case X86::BI__builtin_ia32_kshiftriqi:
+  case X86::BI__builtin_ia32_kshiftrihi:
+  case X86::BI__builtin_ia32_kshiftrisi:
+  case X86::BI__builtin_ia32_kshiftridi:
     i = 1; l = 0; u = 255;
     break;
   case X86::BI__builtin_ia32_vperm2f128_pd256:
@@ -6111,18 +6145,10 @@ class FormatStringLiteral {
                                     StartToken, StartTokenByteOffset);
   }
 
-  LLVM_ATTRIBUTE_DEPRECATED(SourceLocation getLocStart() const LLVM_READONLY,
-                            "Use getBeginLoc instead") {
-    return getBeginLoc();
-  }
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return FExpr->getBeginLoc().getLocWithOffset(Offset);
   }
 
-  LLVM_ATTRIBUTE_DEPRECATED(SourceLocation getLocEnd() const LLVM_READONLY,
-                            "Use getEndLoc instead") {
-    return getEndLoc();
-  }
   SourceLocation getEndLoc() const LLVM_READONLY { return FExpr->getEndLoc(); }
 };
 
@@ -10282,33 +10308,6 @@ static void DiagnoseImpCast(Sema &S, Expr *E, QualType T,
   DiagnoseImpCast(S, E, E->getType(), T, CContext, diag, pruneControlFlow);
 }
 
-/// Analyze the given compound assignment for the possible losing of
-/// floating-point precision.
-static void AnalyzeCompoundAssignment(Sema &S, BinaryOperator *E) {
-  assert(isa<CompoundAssignOperator>(E) &&
-         "Must be compound assignment operation");
-  // Recurse on the LHS and RHS in here
-  AnalyzeImplicitConversions(S, E->getLHS(), E->getOperatorLoc());
-  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc());
-
-  // Now check the outermost expression
-  const auto *ResultBT = E->getLHS()->getType()->getAs<BuiltinType>();
-  const auto *RBT = cast<CompoundAssignOperator>(E)
-                        ->getComputationResultType()
-                        ->getAs<BuiltinType>();
-
-  // If both source and target are floating points.
-  if (ResultBT && ResultBT->isFloatingPoint() && RBT && RBT->isFloatingPoint())
-    // Builtin FP kinds are ordered by increasing FP rank.
-    if (ResultBT->getKind() < RBT->getKind())
-      // We don't want to warn for system macro.
-      if (!S.SourceMgr.isInSystemMacro(E->getOperatorLoc()))
-        // warn about dropping FP rank.
-        DiagnoseImpCast(S, E->getRHS(), E->getLHS()->getType(),
-                        E->getOperatorLoc(),
-                        diag::warn_impcast_float_result_precision);
-}
-
 /// Diagnose an implicit cast from a floating point value to an integer value.
 static void DiagnoseFloatingImpCast(Sema &S, Expr *E, QualType T,
                                     SourceLocation CContext) {
@@ -10409,6 +10408,39 @@ static void DiagnoseFloatingImpCast(Sema &S, Expr *E, QualType T,
         << E->getType() << T.getUnqualifiedType() << PrettySourceValue
         << PrettyTargetValue << E->getSourceRange() << SourceRange(CContext);
   }
+}
+
+/// Analyze the given compound assignment for the possible losing of
+/// floating-point precision.
+static void AnalyzeCompoundAssignment(Sema &S, BinaryOperator *E) {
+  assert(isa<CompoundAssignOperator>(E) &&
+         "Must be compound assignment operation");
+  // Recurse on the LHS and RHS in here
+  AnalyzeImplicitConversions(S, E->getLHS(), E->getOperatorLoc());
+  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc());
+
+  // Now check the outermost expression
+  const auto *ResultBT = E->getLHS()->getType()->getAs<BuiltinType>();
+  const auto *RBT = cast<CompoundAssignOperator>(E)
+                        ->getComputationResultType()
+                        ->getAs<BuiltinType>();
+
+  // The below checks assume source is floating point.
+  if (!ResultBT || !RBT || !RBT->isFloatingPoint()) return;
+
+  // If source is floating point but target is not.
+  if (!ResultBT->isFloatingPoint())
+    return DiagnoseFloatingImpCast(S, E, E->getRHS()->getType(),
+                                   E->getExprLoc());
+
+  // If both source and target are floating points.
+  // Builtin FP kinds are ordered by increasing FP rank.
+  if (ResultBT->getKind() < RBT->getKind() &&
+      // We don't want to warn for system macro.
+      !S.SourceMgr.isInSystemMacro(E->getOperatorLoc()))
+    // warn about dropping FP rank.
+    DiagnoseImpCast(S, E->getRHS(), E->getLHS()->getType(), E->getOperatorLoc(),
+                    diag::warn_impcast_float_result_precision);
 }
 
 static std::string PrettyPrintInRange(const llvm::APSInt &Value,

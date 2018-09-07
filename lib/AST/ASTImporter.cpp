@@ -2164,11 +2164,21 @@ Decl *ASTNodeImporter::VisitEnumDecl(EnumDecl *D) {
 }
 
 Decl *ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
+  bool IsFriendTemplate = false;
+  if (auto *DCXX = dyn_cast<CXXRecordDecl>(D)) {
+    IsFriendTemplate =
+        DCXX->getDescribedClassTemplate() &&
+        DCXX->getDescribedClassTemplate()->getFriendObjectKind() !=
+            Decl::FOK_None;
+  }
+
   // If this record has a definition in the translation unit we're coming from,
   // but this particular declaration is not that definition, import the
   // definition and map to that.
   TagDecl *Definition = D->getDefinition();
   if (Definition && Definition != D &&
+      // Friend template declaration must be imported on its own.
+      !IsFriendTemplate &&
       // In contrast to a normal CXXRecordDecl, the implicit
       // CXXRecordDecl of ClassTemplateSpecializationDecl is its redeclaration.
       // The definition of the implicit CXXRecordDecl in this case is the
@@ -2241,7 +2251,7 @@ Decl *ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
         PrevDecl = FoundRecord;
 
         if (RecordDecl *FoundDef = FoundRecord->getDefinition()) {
-          if ((SearchName && !D->isCompleteDefinition())
+          if ((SearchName && !D->isCompleteDefinition() && !IsFriendTemplate)
               || (D->isCompleteDefinition() &&
                   D->isAnonymousStructOrUnion()
                     == FoundDef->isAnonymousStructOrUnion() &&
@@ -2279,6 +2289,9 @@ Decl *ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
           if (FoundRecord->isCompleteDefinition() &&
               D->isCompleteDefinition() &&
               !IsStructuralMatch(D, FoundRecord))
+            continue;
+
+          if (IsFriendTemplate)
             continue;
 
           AdoptDecl = FoundRecord;
@@ -2348,7 +2361,7 @@ Decl *ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
         if (!ToDescribed)
           return nullptr;
         D2CXX->setDescribedClassTemplate(ToDescribed);
-        if (!DCXX->isInjectedClassName()) {
+        if (!DCXX->isInjectedClassName() && !IsFriendTemplate) {
           // In a record describing a template the type should be an
           // InjectedClassNameType (see Sema::CheckClassTemplate). Update the
           // previously set type to the correct value here (ToDescribed is not
@@ -2877,6 +2890,22 @@ Decl *ASTNodeImporter::VisitFieldDecl(FieldDecl *D) {
       if (Importer.IsStructurallyEquivalent(D->getType(),
                                             FoundField->getType())) {
         Importer.MapImported(D, FoundField);
+        // In case of a FieldDecl of a ClassTemplateSpecializationDecl, the
+        // initializer of a FieldDecl might not had been instantiated in the
+        // "To" context.  However, the "From" context might instantiated that,
+        // thus we have to merge that.
+        if (Expr *FromInitializer = D->getInClassInitializer()) {
+          // We don't have yet the initializer set.
+          if (FoundField->hasInClassInitializer() &&
+              !FoundField->getInClassInitializer()) {
+            Expr *ToInitializer = Importer.Import(FromInitializer);
+            if (!ToInitializer)
+              // We can't return a nullptr here,
+              // since we already mapped D as imported.
+              return FoundField;
+            FoundField->setInClassInitializer(ToInitializer);
+          }
+        }
         return FoundField;
       }
 
@@ -4371,12 +4400,14 @@ static ClassTemplateDecl *getDefinition(ClassTemplateDecl *D) {
 }
 
 Decl *ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
+  bool IsFriend = D->getFriendObjectKind() != Decl::FOK_None;
+
   // If this record has a definition in the translation unit we're coming from,
   // but this particular declaration is not that definition, import the
   // definition and map to that.
   auto *Definition =
       cast_or_null<CXXRecordDecl>(D->getTemplatedDecl()->getDefinition());
-  if (Definition && Definition != D->getTemplatedDecl()) {
+  if (Definition && Definition != D->getTemplatedDecl() && !IsFriend) {
     Decl *ImportedDef
       = Importer.Import(Definition->getDescribedClassTemplate());
     if (!ImportedDef)
@@ -4413,17 +4444,20 @@ Decl *ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
           // definition. So, try to get the definition if that is available in
           // the redecl chain.
           ClassTemplateDecl *TemplateWithDef = getDefinition(FoundTemplate);
-          if (!TemplateWithDef)
+          if (TemplateWithDef)
+            FoundTemplate = TemplateWithDef;
+          else
             continue;
-          FoundTemplate = TemplateWithDef; // Continue with the definition.
         }
 
         if (IsStructuralMatch(D, FoundTemplate)) {
-          // The class templates structurally match; call it the same template.
+          if (!IsFriend) {
+            Importer.MapImported(D->getTemplatedDecl(),
+                                 FoundTemplate->getTemplatedDecl());
+            return Importer.MapImported(D, FoundTemplate);
+          }
 
-          Importer.MapImported(D->getTemplatedDecl(),
-                               FoundTemplate->getTemplatedDecl());
-          return Importer.MapImported(D, FoundTemplate);
+          continue;
         }
       }
 
@@ -4461,9 +4495,17 @@ Decl *ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
 
   ToTemplated->setDescribedClassTemplate(D2);
 
+  if (ToTemplated->getPreviousDecl()) {
+    assert(
+        ToTemplated->getPreviousDecl()->getDescribedClassTemplate() &&
+        "Missing described template");
+    D2->setPreviousDecl(
+        ToTemplated->getPreviousDecl()->getDescribedClassTemplate());
+  }
   D2->setAccess(D->getAccess());
   D2->setLexicalDeclContext(LexicalDC);
-  LexicalDC->addDeclInternal(D2);
+  if (!IsFriend)
+    LexicalDC->addDeclInternal(D2);
 
   if (FromTemplated->isCompleteDefinition() &&
       !ToTemplated->isCompleteDefinition()) {
@@ -4518,27 +4560,50 @@ Decl *ASTNodeImporter::VisitClassTemplateSpecializationDecl(
 
   // Try to find an existing specialization with these template arguments.
   void *InsertPos = nullptr;
-  ClassTemplateSpecializationDecl *D2
-    = ClassTemplate->findSpecialization(TemplateArgs, InsertPos);
-  if (D2) {
-    // We already have a class template specialization with these template
-    // arguments.
-
-    // FIXME: Check for specialization vs. instantiation errors.
-
-    if (RecordDecl *FoundDef = D2->getDefinition()) {
-      if (!D->isCompleteDefinition() || IsStructuralMatch(D, FoundDef)) {
-        // The record types structurally match, or the "from" translation
-        // unit only had a forward declaration anyway; call it the same
-        // function.
-        return Importer.MapImported(D, FoundDef);
-      }
+  ClassTemplateSpecializationDecl *D2 = nullptr;
+  ClassTemplatePartialSpecializationDecl *PartialSpec =
+            dyn_cast<ClassTemplatePartialSpecializationDecl>(D);
+  if (PartialSpec)
+    D2 = ClassTemplate->findPartialSpecialization(TemplateArgs, InsertPos);
+  else
+    D2 = ClassTemplate->findSpecialization(TemplateArgs, InsertPos);
+  ClassTemplateSpecializationDecl * const PrevDecl = D2;
+  RecordDecl *FoundDef = D2 ? D2->getDefinition() : nullptr;
+  if (FoundDef) {
+    if (!D->isCompleteDefinition()) {
+      // The "From" translation unit only had a forward declaration; call it
+      // the same declaration.
+      // TODO Handle the redecl chain properly!
+      return Importer.MapImported(D, FoundDef);
     }
-  } else {
-    // Create a new specialization.
-    if (auto *PartialSpec =
-            dyn_cast<ClassTemplatePartialSpecializationDecl>(D)) {
-      // Import TemplateArgumentListInfo
+
+    if (IsStructuralMatch(D, FoundDef)) {
+
+      Importer.MapImported(D, FoundDef);
+
+      // Import those those default field initializers which have been
+      // instantiated in the "From" context, but not in the "To" context.
+      for (auto *FromField : D->fields())
+        Importer.Import(FromField);
+
+      // Import those methods which have been instantiated in the
+      // "From" context, but not in the "To" context.
+      for (CXXMethodDecl *FromM : D->methods())
+        Importer.Import(FromM);
+
+      // TODO Import instantiated default arguments.
+      // TODO Import instantiated exception specifications.
+      //
+      // Generally, ASTCommon.h/DeclUpdateKind enum gives a very good hint what
+      // else could be fused during an AST merge.
+
+      return FoundDef;
+    }
+  } else { // We either couldn't find any previous specialization in the "To"
+           // context,  or we found one but without definition.  Let's create a
+           // new specialization and register that at the class template.
+    if (PartialSpec) {
+      // Import TemplateArgumentListInfo.
       TemplateArgumentListInfo ToTAInfo;
       const auto &ASTTemplateArgs = *PartialSpec->getTemplateArgsAsWritten();
       if (ImportTemplateArgumentListInfo(ASTTemplateArgs, ToTAInfo))
@@ -4559,20 +4624,31 @@ Decl *ASTNodeImporter::VisitClassTemplateSpecializationDecl(
               D2, D, Importer.getToContext(), D->getTagKind(), DC, StartLoc,
               IdLoc, ToTPList, ClassTemplate,
               llvm::makeArrayRef(TemplateArgs.data(), TemplateArgs.size()),
-              ToTAInfo, CanonInjType, nullptr))
+              ToTAInfo, CanonInjType,
+              cast_or_null<ClassTemplatePartialSpecializationDecl>(PrevDecl)))
         return D2;
 
-    } else {
+      // Update InsertPos, because preceding import calls may have invalidated
+      // it by adding new specializations.
+      if (!ClassTemplate->findPartialSpecialization(TemplateArgs, InsertPos))
+        // Add this partial specialization to the class template.
+        ClassTemplate->AddPartialSpecialization(
+            cast<ClassTemplatePartialSpecializationDecl>(D2), InsertPos);
+
+    } else { // Not a partial specialization.
       if (GetImportedOrCreateDecl(
               D2, D, Importer.getToContext(), D->getTagKind(), DC, StartLoc,
-              IdLoc, ClassTemplate, TemplateArgs, /*PrevDecl=*/nullptr))
+              IdLoc, ClassTemplate, TemplateArgs, PrevDecl))
         return D2;
+
+      // Update InsertPos, because preceding import calls may have invalidated
+      // it by adding new specializations.
+      if (!ClassTemplate->findSpecialization(TemplateArgs, InsertPos))
+        // Add this specialization to the class template.
+        ClassTemplate->AddSpecialization(D2, InsertPos);
     }
 
     D2->setSpecializationKind(D->getSpecializationKind());
-
-    // Add this specialization to the class template.
-    ClassTemplate->AddSpecialization(D2, InsertPos);
 
     // Import the qualifier, if any.
     D2->setQualifierInfo(Importer.Import(D->getQualifierLoc()));
@@ -6012,38 +6088,6 @@ Expr *ASTNodeImporter::VisitExplicitCastExpr(ExplicitCastExpr *E) {
             TInfo, SubExpr);
   }
   default:
-    break; // just fall through
-  }
-
-  auto *Named = cast<CXXNamedCastExpr>(E);
-  SourceLocation ExprLoc = Importer.Import(Named->getOperatorLoc()),
-      RParenLoc = Importer.Import(Named->getRParenLoc());
-  SourceRange Brackets = Importer.Import(Named->getAngleBrackets());
-
-  switch (E->getStmtClass()) {
-  case Stmt::CXXStaticCastExprClass:
-    return CXXStaticCastExpr::Create(Importer.getToContext(), T,
-                                     E->getValueKind(), E->getCastKind(),
-                                     SubExpr, &BasePath, TInfo,
-                                     ExprLoc, RParenLoc, Brackets);
-
-  case Stmt::CXXDynamicCastExprClass:
-    return CXXDynamicCastExpr::Create(Importer.getToContext(), T,
-                                      E->getValueKind(), E->getCastKind(),
-                                      SubExpr, &BasePath, TInfo,
-                                      ExprLoc, RParenLoc, Brackets);
-
-  case Stmt::CXXReinterpretCastExprClass:
-    return CXXReinterpretCastExpr::Create(Importer.getToContext(), T,
-                                          E->getValueKind(), E->getCastKind(),
-                                          SubExpr, &BasePath, TInfo,
-                                          ExprLoc, RParenLoc, Brackets);
-
-  case Stmt::CXXConstCastExprClass:
-    return CXXConstCastExpr::Create(Importer.getToContext(), T,
-                                    E->getValueKind(), SubExpr, TInfo, ExprLoc,
-                                    RParenLoc, Brackets);
-  default:
     llvm_unreachable("Cast expression of unsupported type!");
     return nullptr;
   }
@@ -6773,9 +6817,9 @@ Expr *ASTNodeImporter::VisitInitListExpr(InitListExpr *ILE) {
     To->setSyntacticForm(ToSyntForm);
   }
 
+  // Copy InitListExprBitfields, which are not handled in the ctor of
+  // InitListExpr.
   To->sawArrayRangeDesignator(ILE->hadArrayRangeDesignator());
-  To->setValueDependent(ILE->isValueDependent());
-  To->setInstantiationDependent(ILE->isInstantiationDependent());
 
   return To;
 }
@@ -6871,6 +6915,10 @@ Expr *ASTNodeImporter::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
     return CXXReinterpretCastExpr::Create(
         Importer.getToContext(), ToType, VK, CK, ToOp, &BasePath,
         ToWritten, ToOperatorLoc, ToRParenLoc, ToAngleBrackets);
+  } else if (isa<CXXConstCastExpr>(E)) {
+    return CXXConstCastExpr::Create(Importer.getToContext(), ToType, VK, ToOp,
+                                    ToWritten, ToOperatorLoc, ToRParenLoc,
+                                    ToAngleBrackets);
   } else {
     return nullptr;
   }
@@ -7115,6 +7163,19 @@ Stmt *ASTImporter::Import(Stmt *FromS) {
   Stmt *ToS = Importer.Visit(FromS);
   if (!ToS)
     return nullptr;
+
+  if (auto *ToE = dyn_cast<Expr>(ToS)) {
+    auto *FromE = cast<Expr>(FromS);
+    // Copy ExprBitfields, which may not be handled in Expr subclasses
+    // constructors.
+    ToE->setValueKind(FromE->getValueKind());
+    ToE->setObjectKind(FromE->getObjectKind());
+    ToE->setTypeDependent(FromE->isTypeDependent());
+    ToE->setValueDependent(FromE->isValueDependent());
+    ToE->setInstantiationDependent(FromE->isInstantiationDependent());
+    ToE->setContainsUnexpandedParameterPack(
+        FromE->containsUnexpandedParameterPack());
+  }
 
   // Record the imported declaration.
   ImportedStmts[FromS] = ToS;

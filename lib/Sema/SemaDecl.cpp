@@ -5999,14 +5999,14 @@ static void checkAttributesAfterMerging(Sema &S, NamedDecl &ND) {
       // The [[lifetimebound]] attribute can be applied to the implicit object
       // parameter of a non-static member function (other than a ctor or dtor)
       // by applying it to the function type.
-      if (ATL.getAttrKind() == AttributedType::attr_lifetimebound) {
+      if (const auto *A = ATL.getAttrAs<LifetimeBoundAttr>()) {
         const auto *MD = dyn_cast<CXXMethodDecl>(FD);
         if (!MD || MD->isStatic()) {
-          S.Diag(ATL.getAttrNameLoc(), diag::err_lifetimebound_no_object_param)
-              << !MD << ATL.getLocalSourceRange();
+          S.Diag(A->getLocation(), diag::err_lifetimebound_no_object_param)
+              << !MD << A->getRange();
         } else if (isa<CXXConstructorDecl>(MD) || isa<CXXDestructorDecl>(MD)) {
-          S.Diag(ATL.getAttrNameLoc(), diag::err_lifetimebound_ctor_dtor)
-              << isa<CXXDestructorDecl>(MD) << ATL.getLocalSourceRange();
+          S.Diag(A->getLocation(), diag::err_lifetimebound_ctor_dtor)
+              << isa<CXXDestructorDecl>(MD) << A->getRange();
         }
       }
     }
@@ -7956,14 +7956,11 @@ static FunctionDecl* CreateNewFunctionDecl(Sema &SemaRef, Declarator &D,
                                     NameInfo, R, TInfo, isInline,
                                     /*isImplicitlyDeclared=*/false);
 
-      // If the class is complete, then we now create the implicit exception
-      // specification. If the class is incomplete or dependent, we can't do
-      // it yet.
-      if (SemaRef.getLangOpts().CPlusPlus11 && !Record->isDependentType() &&
-          Record->getDefinition() && !Record->isBeingDefined() &&
-          R->getAs<FunctionProtoType>()->getExceptionSpecType() == EST_None) {
-        SemaRef.AdjustDestructorExceptionSpec(Record, NewDD);
-      }
+      // If the destructor needs an implicit exception specification, set it
+      // now. FIXME: It'd be nice to be able to create the right type to start
+      // with, but the type needs to reference the destructor declaration.
+      if (SemaRef.getLangOpts().CPlusPlus11)
+        SemaRef.AdjustDestructorExceptionSpec(NewDD);
 
       IsVirtualOkay = true;
       return NewDD;
@@ -11812,8 +11809,16 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       if (!result.isInvalid()) {
         result = MaybeCreateExprWithCleanups(result);
         Expr *init = result.getAs<Expr>();
-        Context.setBlockVarCopyInits(var, init);
+        Context.setBlockVarCopyInit(var, init, canThrow(init));
       }
+
+      // The destructor's exception spefication is needed when IRGen generates
+      // block copy/destroy functions. Resolve it here.
+      if (const CXXRecordDecl *RD = type->getAsCXXRecordDecl())
+        if (CXXDestructorDecl *DD = RD->getDestructor()) {
+          auto *FPT = DD->getType()->getAs<FunctionProtoType>();
+          FPT = ResolveExceptionSpec(poi, FPT);
+        }
     }
   }
 
@@ -15802,13 +15807,6 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
       }
 
       if (!CXXRecord->isDependentType()) {
-        if (CXXRecord->hasUserDeclaredDestructor()) {
-          // Adjust user-defined destructor exception spec.
-          if (getLangOpts().CPlusPlus11)
-            AdjustDestructorExceptionSpec(CXXRecord,
-                                          CXXRecord->getDestructor());
-        }
-
         // Add any implicitly-declared members to this class.
         AddImplicitlyDeclaredMembersToClass(CXXRecord);
 

@@ -946,6 +946,13 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
     Record.push_back(0);
   }
 
+  if (D->hasAttr<BlocksAttr>() && D->getType()->getAsCXXRecordDecl()) {
+    ASTContext::BlockVarCopyInit Init = Writer.Context->getBlockVarCopyInit(D);
+    Record.AddStmt(Init.getCopyExpr());
+    if (Init.getCopyExpr())
+      Record.push_back(Init.canThrow());
+  }
+
   if (D->getStorageDuration() == SD_Static) {
     bool ModulesCodegen = false;
     if (Writer.WritingModule &&
@@ -998,6 +1005,7 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
       !D->isConstexpr() &&
       !D->isInitCapture() &&
       !D->isPreviousDeclInSameBlockScope() &&
+      !(D->hasAttr<BlocksAttr>() && D->getType()->getAsCXXRecordDecl()) &&
       D->getStorageDuration() != SD_Static &&
       !D->getMemberSpecializationInfo())
     AbbrevToUse = Writer.getDeclVarAbbrev();
@@ -2229,8 +2237,7 @@ static bool isRequiredDecl(const Decl *D, ASTContext &Context,
 
   // File scoped assembly or obj-c or OMP declare target implementation must be
   // seen.
-  if (isa<FileScopeAsmDecl>(D) || isa<ObjCImplDecl>(D) ||
-      D->hasAttr<OMPDeclareTargetDeclAttr>())
+  if (isa<FileScopeAsmDecl>(D) || isa<ObjCImplDecl>(D))
     return true;
 
   if (WritingModule && (isa<VarDecl>(D) || isa<ImportDecl>(D))) {
