@@ -194,7 +194,7 @@ void HTMLDiagnostics::ReportDiag(const PathDiagnostic& D,
           FullSourceLoc L(
               SMgr.getExpansionLoc(path.back()->getLocation().asLocation()),
               SMgr);
-          FullSourceLoc FunL(SMgr.getExpansionLoc(Body->getLocStart()), SMgr);
+          FullSourceLoc FunL(SMgr.getExpansionLoc(Body->getBeginLoc()), SMgr);
           offsetDecl = L.getExpansionLineNumber() - FunL.getExpansionLineNumber();
       }
   }
@@ -337,23 +337,8 @@ static void serializeExecutedLines(
     const PathDiagnostic &D,
     const PathPieces &path,
     llvm::raw_string_ostream &os) {
-  // Copy executed lines from path diagnostics.
-  std::map<unsigned, std::set<unsigned>> ExecutedLines;
-  for (auto I = D.executedLines_begin(),
-            E = D.executedLines_end(); I != E; ++I) {
-    std::set<unsigned> &LinesInFile = ExecutedLines[I->first];
-    for (unsigned LineNo : I->second) {
-      LinesInFile.insert(LineNo);
-    }
-  }
 
-  // We need to include all lines for which any kind of diagnostics appears.
-  for (const auto &P : path) {
-    FullSourceLoc Loc = P->getLocation().asLocation().getExpansionLoc();
-    FileID FID = Loc.getFileID();
-    unsigned LineNo = Loc.getLineNumber();
-    ExecutedLines[FID.getHashValue()].insert(LineNo);
-  }
+  const FilesToLineNumsMap &ExecutedLines = D.getExecutedLines();
 
   os << "var relevant_lines = {";
   for (auto I = ExecutedLines.begin(),
@@ -361,7 +346,7 @@ static void serializeExecutedLines(
     if (I != ExecutedLines.begin())
       os << ", ";
 
-    os << "\"" << I->first << "\": {";
+    os << "\"" << I->first.getHashValue() << "\": {";
     for (unsigned LineNo : I->second) {
       if (LineNo != *(I->second.begin()))
         os << ", ";
@@ -997,7 +982,8 @@ var numToId = function(num) {
 };
 
 var navigateTo = function(up) {
-  var numItems = document.querySelectorAll(".line > .msg").length;
+  var numItems = document.querySelectorAll(
+      ".line > .msgEvent, .line > .msgControl").length;
   var currentSelected = findNum();
   var newSelected = move(currentSelected, up, numItems);
   var newEl = numToId(newSelected, numItems);

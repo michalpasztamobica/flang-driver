@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState.h"
 #include "clang/Analysis/CFG.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
@@ -66,6 +67,13 @@ ProgramState::ProgramState(const ProgramState &RHS)
 ProgramState::~ProgramState() {
   if (store)
     stateMgr->getStoreManager().decrementReferenceCount(store);
+}
+
+int64_t ProgramState::getID() const {
+  Optional<int64_t> Out = getStateManager().Alloc.identifyObject(this);
+  assert(Out && "Wrong allocator used");
+  assert(*Out % alignof(ProgramState) == 0 && "Wrong alignment information");
+  return *Out / alignof(ProgramState);
 }
 
 ProgramStateManager::ProgramStateManager(ASTContext &Ctx,
@@ -492,6 +500,10 @@ void ProgramState::printTaint(raw_ostream &Out,
 
 void ProgramState::dumpTaint() const {
   printTaint(llvm::errs());
+}
+
+AnalysisManager& ProgramState::getAnalysisManager() const {
+  return stateMgr->getOwningEngine()->getAnalysisManager();
 }
 
 //===----------------------------------------------------------------------===//

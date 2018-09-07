@@ -17,6 +17,7 @@
 #include "clang-c/Index.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Lex/MacroInfo.h"
 #include "clang/Sema/CodeCompleteOptions.h"
 #include "clang/Sema/DeclSpec.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -843,6 +844,11 @@ public:
   /// corresponding `using decl::qualified::name;` nearby.
   const UsingShadowDecl *ShadowDecl = nullptr;
 
+  /// If the result is RK_Macro, this can store the information about the macro
+  /// definition. This should be set in most cases but can be missing when
+  /// the macro has been undefined.
+  const MacroInfo *MacroDefInfo = nullptr;
+
   /// Build a result that refers to a declaration.
   CodeCompletionResult(const NamedDecl *Declaration, unsigned Priority,
                        NestedNameSpecifier *Qualifier = nullptr,
@@ -867,11 +873,13 @@ public:
 
   /// Build a result that refers to a macro.
   CodeCompletionResult(const IdentifierInfo *Macro,
+                       const MacroInfo *MI = nullptr,
                        unsigned Priority = CCP_Macro)
       : Macro(Macro), Priority(Priority), Kind(RK_Macro),
         CursorKind(CXCursor_MacroDefinition), Hidden(false),
         QualifierIsInformative(false), StartsNestedNameSpecifier(false),
-        AllParametersAreInformative(false), DeclaringEntity(false) {}
+        AllParametersAreInformative(false), DeclaringEntity(false),
+        MacroDefInfo(MI) {}
 
   /// Build a result that refers to a pattern.
   CodeCompletionResult(CodeCompletionString *Pattern,
@@ -895,9 +903,11 @@ public:
     computeCursorKindAndAvailability();
   }
 
-  /// Retrieve the declaration stored in this result.
+  /// Retrieve the declaration stored in this result. This might be nullptr if
+  /// Kind is RK_Pattern.
   const NamedDecl *getDeclaration() const {
-    assert(Kind == RK_Declaration && "Not a declaration result");
+    assert(((Kind == RK_Declaration) || (Kind == RK_Pattern)) &&
+           "Not a declaration or pattern result");
     return Declaration;
   }
 
@@ -1112,9 +1122,13 @@ public:
   /// \param Candidates an array of overload candidates.
   ///
   /// \param NumCandidates the number of overload candidates
+  ///
+  /// \param OpenParLoc location of the opening parenthesis of the argument
+  ///        list.
   virtual void ProcessOverloadCandidates(Sema &S, unsigned CurrentArg,
                                          OverloadCandidate *Candidates,
-                                         unsigned NumCandidates) {}
+                                         unsigned NumCandidates,
+                                         SourceLocation OpenParLoc) {}
   //@}
 
   /// Retrieve the allocator that will be used to allocate
@@ -1164,7 +1178,8 @@ public:
 
   void ProcessOverloadCandidates(Sema &S, unsigned CurrentArg,
                                  OverloadCandidate *Candidates,
-                                 unsigned NumCandidates) override;
+                                 unsigned NumCandidates,
+                                 SourceLocation OpenParLoc) override;
 
   bool isResultFilteredOut(StringRef Filter, CodeCompletionResult Results) override;
 
