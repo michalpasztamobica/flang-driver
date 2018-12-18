@@ -90,8 +90,6 @@ void __inwordstring(unsigned short, unsigned short *, unsigned long);
 void __lidt(void *);
 unsigned __int64 __ll_lshift(unsigned __int64, int);
 __int64 __ll_rshift(__int64, int);
-unsigned int __lzcnt(unsigned int);
-unsigned short __lzcnt16(unsigned short);
 static __inline__
 void __movsb(unsigned char *, unsigned char const *, size_t);
 static __inline__
@@ -219,7 +217,6 @@ void __incgsbyte(unsigned long);
 void __incgsdword(unsigned long);
 void __incgsqword(unsigned long);
 void __incgsword(unsigned long);
-unsigned __int64 __lzcnt64(unsigned __int64);
 static __inline__
 void __movsq(unsigned long long *, unsigned long long const *, size_t);
 static __inline__
@@ -535,7 +532,7 @@ __stosq(unsigned __int64 *__dst, unsigned __int64 __x, size_t __n) {
 static __inline__ void __DEFAULT_FN_ATTRS
 __cpuid(int __info[4], int __level) {
   __asm__ ("cpuid" : "=a"(__info[0]), "=b" (__info[1]), "=c"(__info[2]), "=d"(__info[3])
-                   : "a"(__level));
+                   : "a"(__level), "c"(0));
 }
 static __inline__ void __DEFAULT_FN_ATTRS
 __cpuidex(int __info[4], int __level, int __ecx) {
