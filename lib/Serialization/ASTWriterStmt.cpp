@@ -1303,8 +1303,8 @@ void ASTStmtWriter::VisitMSDependentExistsStmt(MSDependentExistsStmt *S) {
 void ASTStmtWriter::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   VisitCallExpr(E);
   Record.push_back(E->getOperator());
-  Record.AddSourceRange(E->Range);
   Record.push_back(E->getFPFeatures().getInt());
+  Record.AddSourceRange(E->Range);
   Code = serialization::EXPR_CXX_OPERATOR_CALL;
 }
 
@@ -1315,18 +1315,21 @@ void ASTStmtWriter::VisitCXXMemberCallExpr(CXXMemberCallExpr *E) {
 
 void ASTStmtWriter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   VisitExpr(E);
+
   Record.push_back(E->getNumArgs());
-  for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I)
-    Record.AddStmt(E->getArg(I));
-  Record.AddDeclRef(E->getConstructor());
-  Record.AddSourceLocation(E->getLocation());
   Record.push_back(E->isElidable());
   Record.push_back(E->hadMultipleCandidates());
   Record.push_back(E->isListInitialization());
   Record.push_back(E->isStdInitListInitialization());
   Record.push_back(E->requiresZeroInitialization());
   Record.push_back(E->getConstructionKind()); // FIXME: stable encoding
+  Record.AddSourceLocation(E->getLocation());
+  Record.AddDeclRef(E->getConstructor());
   Record.AddSourceRange(E->getParenOrBraceRange());
+
+  for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I)
+    Record.AddStmt(E->getArg(I));
+
   Code = serialization::EXPR_CXX_CONSTRUCT;
 }
 
@@ -1480,20 +1483,27 @@ void ASTStmtWriter::VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *E) {
 
 void ASTStmtWriter::VisitCXXNewExpr(CXXNewExpr *E) {
   VisitExpr(E);
-  Record.push_back(E->isGlobalNew());
+
   Record.push_back(E->isArray());
+  Record.push_back(E->hasInitializer());
+  Record.push_back(E->getNumPlacementArgs());
+  Record.push_back(E->isParenTypeId());
+
+  Record.push_back(E->isGlobalNew());
   Record.push_back(E->passAlignment());
   Record.push_back(E->doesUsualArrayDeleteWantSize());
-  Record.push_back(E->getNumPlacementArgs());
-  Record.push_back(E->StoredInitializationStyle);
+  Record.push_back(E->CXXNewExprBits.StoredInitializationStyle);
+
   Record.AddDeclRef(E->getOperatorNew());
   Record.AddDeclRef(E->getOperatorDelete());
   Record.AddTypeSourceInfo(E->getAllocatedTypeSourceInfo());
-  Record.AddSourceRange(E->getTypeIdParens());
+  if (E->isParenTypeId())
+    Record.AddSourceRange(E->getTypeIdParens());
   Record.AddSourceRange(E->getSourceRange());
   Record.AddSourceRange(E->getDirectInitRange());
-  for (CXXNewExpr::arg_iterator I = E->raw_arg_begin(), e = E->raw_arg_end();
-       I != e; ++I)
+
+  for (CXXNewExpr::arg_iterator I = E->raw_arg_begin(), N = E->raw_arg_end();
+       I != N; ++I)
     Record.AddStmt(*I);
 
   Code = serialization::EXPR_CXX_NEW;
@@ -1580,8 +1590,8 @@ ASTStmtWriter::VisitDependentScopeDeclRefExpr(DependentScopeDeclRefExpr *E) {
   // Don't emit anything here, HasTemplateKWAndArgsInfo must be
   // emitted first.
 
-  Record.push_back(E->HasTemplateKWAndArgsInfo);
-  if (E->HasTemplateKWAndArgsInfo) {
+  Record.push_back(E->DependentScopeDeclRefExprBits.HasTemplateKWAndArgsInfo);
+  if (E->DependentScopeDeclRefExprBits.HasTemplateKWAndArgsInfo) {
     const ASTTemplateKWAndArgsInfo &ArgInfo =
         *E->getTrailingObjects<ASTTemplateKWAndArgsInfo>();
     Record.push_back(ArgInfo.NumTemplateArgs);
