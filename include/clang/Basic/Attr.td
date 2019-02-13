@@ -1514,8 +1514,16 @@ def AMDGPUNumVGPR : InheritableAttr {
 def WebAssemblyImportModule : InheritableAttr,
                               TargetSpecificAttr<TargetWebAssembly> {
   let Spellings = [Clang<"import_module">];
-  let Args = [StringArgument<"ImportModuleName">];
+  let Args = [StringArgument<"ImportModule">];
   let Documentation = [WebAssemblyImportModuleDocs];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+}
+
+def WebAssemblyImportName : InheritableAttr,
+                            TargetSpecificAttr<TargetWebAssembly> {
+  let Spellings = [Clang<"import_name">];
+  let Args = [StringArgument<"ImportName">];
+  let Documentation = [WebAssemblyImportNameDocs];
   let Subjects = SubjectList<[Function], ErrorDiag>;
 }
 
@@ -1557,6 +1565,13 @@ def PassObjectSize : InheritableParamAttr {
   let Args = [IntArgument<"Type">];
   let Subjects = SubjectList<[ParmVar]>;
   let Documentation = [PassObjectSizeDocs];
+}
+
+def FortifyStdLib : InheritableAttr {
+  let Spellings = [Clang<"fortify_stdlib">];
+  let Args = [IntArgument<"Type">, IntArgument<"Flag">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [FortifyStdLibDocs];
 }
 
 // Nullability type attributes.
@@ -1748,6 +1763,13 @@ def ObjCRootClass : InheritableAttr {
   let Spellings = [Clang<"objc_root_class">];
   let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
   let Documentation = [Undocumented];
+}
+
+def ObjCNonLazyClass : Attr {
+  let Spellings = [Clang<"objc_nonlazy_class">];
+  let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
+  let LangOpts = [ObjC];
+  let Documentation = [ObjCNonLazyClassDocs];
 }
 
 def ObjCSubclassingRestricted : InheritableAttr {

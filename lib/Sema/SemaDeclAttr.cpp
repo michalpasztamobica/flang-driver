@@ -716,7 +716,8 @@ static void checkAttrArgsAreCapabilityObjs(Sema &S, Decl *D,
         uint64_t ParamIdxFromOne = ArgValue.getZExtValue();
         uint64_t ParamIdxFromZero = ParamIdxFromOne - 1;
         if (!ArgValue.isStrictlyPositive() || ParamIdxFromOne > NumParams) {
-          S.Diag(AL.getLoc(), diag::err_attribute_argument_out_of_range)
+          S.Diag(AL.getLoc(),
+                 diag::err_attribute_argument_out_of_bounds_extra_info)
               << AL << Idx + 1 << NumParams;
           continue;
         }
@@ -1118,7 +1119,7 @@ static void handlePassObjectSizeAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // __builtin_object_size. So, it has the same constraints as that second
   // argument; namely, it must be in the range [0, 3].
   if (Type > 3) {
-    S.Diag(E->getBeginLoc(), diag::err_attribute_argument_outof_range)
+    S.Diag(E->getBeginLoc(), diag::err_attribute_argument_out_of_range)
         << AL << 0 << 3 << E->getSourceRange();
     return;
   }
@@ -3299,7 +3300,7 @@ static void handleInitPriorityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
 
   if (prioritynum < 101 || prioritynum > 65535) {
-    S.Diag(AL.getLoc(), diag::err_attribute_argument_outof_range)
+    S.Diag(AL.getLoc(), diag::err_attribute_argument_out_of_range)
         << E->getSourceRange() << AL << 101 << 65535;
     AL.setInvalid();
     return;
@@ -5732,6 +5733,29 @@ static void handleWebAssemblyImportModuleAttr(Sema &S, Decl *D, const ParsedAttr
       AL.getAttributeSpellingListIndex()));
 }
 
+static void handleWebAssemblyImportNameAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!isFunctionOrMethod(D)) {
+    S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
+        << "'import_name'" << ExpectedFunction;
+    return;
+  }
+
+  auto *FD = cast<FunctionDecl>(D);
+  if (FD->isThisDeclarationADefinition()) {
+    S.Diag(D->getLocation(), diag::err_alias_is_definition) << FD << 0;
+    return;
+  }
+
+  StringRef Str;
+  SourceLocation ArgLoc;
+  if (!S.checkStringLiteralArgumentAttr(AL, 0, Str, &ArgLoc))
+    return;
+
+  FD->addAttr(::new (S.Context) WebAssemblyImportNameAttr(
+      AL.getRange(), S.Context, Str,
+      AL.getAttributeSpellingListIndex()));
+}
+
 static void handleRISCVInterruptAttr(Sema &S, Decl *D,
                                      const ParsedAttr &AL) {
   // Warn about repeated attributes.
@@ -6396,6 +6420,31 @@ static void handleObjCExternallyRetainedAttr(Sema &S, Decl *D,
   handleSimpleAttribute<ObjCExternallyRetainedAttr>(S, D, AL);
 }
 
+static void handleFortifyStdLib(Sema &S, Decl *D, const ParsedAttr &AL) {
+  auto *FD = cast<FunctionDecl>(D);
+  unsigned VariantID = Builtin::getFortifiedVariantFunction(FD->getBuiltinID());
+  if (VariantID == 0) {
+    S.Diag(D->getLocation(), diag::err_fortify_std_lib_bad_decl);
+    return;
+  }
+
+  uint32_t BOSType, Flag;
+  if (!checkUInt32Argument(S, AL, AL.getArgAsExpr(0), BOSType, 0, true) ||
+      !checkUInt32Argument(S, AL, AL.getArgAsExpr(1), Flag, 1, true))
+    return;
+
+  if (BOSType > 3) {
+    S.Diag(AL.getArgAsExpr(0)->getBeginLoc(),
+           diag::err_attribute_argument_out_of_range)
+        << AL << 0 << 3;
+    return;
+  }
+
+  D->addAttr(::new (S.getASTContext()) FortifyStdLibAttr(
+      AL.getLoc(), S.getASTContext(), BOSType, Flag,
+      AL.getAttributeSpellingListIndex()));
+}
+
 //===----------------------------------------------------------------------===//
 // Top Level Sema Entry Points
 //===----------------------------------------------------------------------===//
@@ -6488,6 +6537,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_WebAssemblyImportModule:
     handleWebAssemblyImportModuleAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_WebAssemblyImportName:
+    handleWebAssemblyImportNameAttr(S, D, AL);
     break;
   case ParsedAttr::AT_IBAction:
     handleSimpleAttribute<IBActionAttr>(S, D, AL);
@@ -6806,6 +6858,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_ObjCRootClass:
     handleSimpleAttribute<ObjCRootClassAttr>(S, D, AL);
     break;
+  case ParsedAttr::AT_ObjCNonLazyClass:
+    handleSimpleAttribute<ObjCNonLazyClassAttr>(S, D, AL);
+    break;
   case ParsedAttr::AT_ObjCSubclassingRestricted:
     handleSimpleAttribute<ObjCSubclassingRestrictedAttr>(S, D, AL);
     break;
@@ -7118,6 +7173,10 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
 
   case ParsedAttr::AT_ObjCExternallyRetained:
     handleObjCExternallyRetainedAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_FortifyStdLib:
+    handleFortifyStdLib(S, D, AL);
     break;
   }
 }

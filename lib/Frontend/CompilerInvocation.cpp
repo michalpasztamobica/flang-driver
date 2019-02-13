@@ -1322,6 +1322,8 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
 
   Opts.DefaultFunctionAttrs = Args.getAllArgValues(OPT_default_function_attr);
 
+  Opts.PassPlugins = Args.getAllArgValues(OPT_fpass_plugin_EQ);
+
   return Success;
 }
 
@@ -2825,7 +2827,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
 
   // Set the flag to prevent the implementation from emitting device exception
   // handling code for those requiring so.
-  Opts.OpenMPHostCXXExceptions = Opts.Exceptions && Opts.CXXExceptions;
   if ((Opts.OpenMPIsDevice && T.isNVPTX()) || Opts.OpenCLCPlusPlus) {
     Opts.Exceptions = 0;
     Opts.CXXExceptions = 0;
