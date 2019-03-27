@@ -91,12 +91,20 @@ protected:
   //===--- Statement bitfields classes ---===//
 
   class StmtBitfields {
+    friend class ASTStmtReader;
+    friend class ASTStmtWriter;
     friend class Stmt;
 
     /// The statement class.
     unsigned sClass : 8;
+
+    /// This bit is set only for the Stmts that are the structured-block of
+    /// OpenMP executable directives. Directives that have a structured block
+    /// are called "non-standalone" directives.
+    /// I.e. those returned by OMPExecutableDirective::getStructuredBlock().
+    unsigned IsOMPStructuredBlock : 1;
   };
-  enum { NumStmtBits = 8 };
+  enum { NumStmtBits = 9 };
 
   class NullStmtBitfields {
     friend class ASTStmtReader;
@@ -1026,6 +1034,7 @@ public:
     static_assert(sizeof(*this) % alignof(void *) == 0,
                   "Insufficient alignment!");
     StmtBits.sClass = SC;
+    StmtBits.IsOMPStructuredBlock = false;
     if (StatisticsEnabled) Stmt::addStmtClass(SC);
   }
 
@@ -1034,6 +1043,11 @@ public:
   }
 
   const char *getStmtClassName() const;
+
+  bool isOMPStructuredBlock() const { return StmtBits.IsOMPStructuredBlock; }
+  void setIsOMPStructuredBlock(bool IsOMPStructuredBlock) {
+    StmtBits.IsOMPStructuredBlock = IsOMPStructuredBlock;
+  }
 
   /// SourceLocation tokens are not useful in isolation - they are low level
   /// value objects created/interpreted by SourceManager. We assume AST
@@ -1584,21 +1598,44 @@ Stmt *SwitchCase::getSubStmt() {
   llvm_unreachable("SwitchCase is neither a CaseStmt nor a DefaultStmt!");
 }
 
+/// Represents a statement that could possibly have a value and type. This
+/// covers expression-statements, as well as labels and attributed statements.
+///
+/// Value statements have a special meaning when they are the last non-null
+/// statement in a GNU statement expression, where they determine the value
+/// of the statement expression.
+class ValueStmt : public Stmt {
+protected:
+  using Stmt::Stmt;
+
+public:
+  const Expr *getExprStmt() const;
+  Expr *getExprStmt() {
+    const ValueStmt *ConstThis = this;
+    return const_cast<Expr*>(ConstThis->getExprStmt());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() >= firstValueStmtConstant &&
+           T->getStmtClass() <= lastValueStmtConstant;
+  }
+};
+
 /// LabelStmt - Represents a label, which has a substatement.  For example:
 ///    foo: return;
-class LabelStmt : public Stmt {
+class LabelStmt : public ValueStmt {
   LabelDecl *TheDecl;
   Stmt *SubStmt;
 
 public:
   /// Build a label statement.
   LabelStmt(SourceLocation IL, LabelDecl *D, Stmt *substmt)
-      : Stmt(LabelStmtClass), TheDecl(D), SubStmt(substmt) {
+      : ValueStmt(LabelStmtClass), TheDecl(D), SubStmt(substmt) {
     setIdentLoc(IL);
   }
 
   /// Build an empty label statement.
-  explicit LabelStmt(EmptyShell Empty) : Stmt(LabelStmtClass, Empty) {}
+  explicit LabelStmt(EmptyShell Empty) : ValueStmt(LabelStmtClass, Empty) {}
 
   SourceLocation getIdentLoc() const { return LabelStmtBits.IdentLoc; }
   void setIdentLoc(SourceLocation L) { LabelStmtBits.IdentLoc = L; }
@@ -1627,7 +1664,7 @@ public:
 /// Represents an attribute applied to a statement. For example:
 ///   [[omp::for(...)]] for (...) { ... }
 class AttributedStmt final
-    : public Stmt,
+    : public ValueStmt,
       private llvm::TrailingObjects<AttributedStmt, const Attr *> {
   friend class ASTStmtReader;
   friend TrailingObjects;
@@ -1636,14 +1673,14 @@ class AttributedStmt final
 
   AttributedStmt(SourceLocation Loc, ArrayRef<const Attr *> Attrs,
                  Stmt *SubStmt)
-      : Stmt(AttributedStmtClass), SubStmt(SubStmt) {
+      : ValueStmt(AttributedStmtClass), SubStmt(SubStmt) {
     AttributedStmtBits.NumAttrs = Attrs.size();
     AttributedStmtBits.AttrLoc = Loc;
     std::copy(Attrs.begin(), Attrs.end(), getAttrArrayPtr());
   }
 
   explicit AttributedStmt(EmptyShell Empty, unsigned NumAttrs)
-      : Stmt(AttributedStmtClass, Empty) {
+      : ValueStmt(AttributedStmtClass, Empty) {
     AttributedStmtBits.NumAttrs = NumAttrs;
     AttributedStmtBits.AttrLoc = SourceLocation{};
     std::fill_n(getAttrArrayPtr(), NumAttrs, nullptr);
