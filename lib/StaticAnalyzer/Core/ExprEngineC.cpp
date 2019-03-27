@@ -415,7 +415,9 @@ void ExprEngine::VisitCast(const CastExpr *CastE, const Expr *Ex,
       case CK_IntToOCLSampler:
       case CK_LValueBitCast:
       case CK_FixedPointCast:
-      case CK_FixedPointToBoolean: {
+      case CK_FixedPointToBoolean:
+      case CK_FixedPointToIntegral:
+      case CK_IntegralToFixedPoint: {
         state =
             handleLValueBitCast(state, Ex, LCtx, T, ExTy, CastE, Bldr, Pred);
         continue;
@@ -702,7 +704,7 @@ void ExprEngine::VisitInitListExpr(const InitListExpr *IE,
   QualType T = getContext().getCanonicalType(IE->getType());
   unsigned NumInitElements = IE->getNumInits();
 
-  if (!IE->isGLValue() &&
+  if (!IE->isGLValue() && !IE->isTransparent() &&
       (T->isArrayType() || T->isRecordType() || T->isVectorType() ||
        T->isAnyComplexType())) {
     llvm::ImmutableList<SVal> vals = getBasicVals().getEmptySValList();

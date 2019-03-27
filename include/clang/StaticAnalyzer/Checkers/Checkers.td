@@ -94,6 +94,8 @@ def Debug : Package<"debug">;
 
 def CloneDetectionAlpha : Package<"clone">, ParentPackage<Alpha>;
 
+def NonDeterminismAlpha : Package<"nondeterminism">, ParentPackage<Alpha>;
+
 //===----------------------------------------------------------------------===//
 // Core Checkers.
 //===----------------------------------------------------------------------===//
@@ -508,6 +510,7 @@ def ValistBase : Checker<"ValistBase">,
 
 def UninitializedChecker : Checker<"Uninitialized">,
   HelpText<"Check for usages of uninitialized (or already released) va_lists.">,
+  Dependencies<[ValistBase]>,
   Documentation<NotDocumented>;
 
 def UnterminatedChecker : Checker<"Unterminated">,
@@ -710,6 +713,11 @@ def MacOSXAPIChecker : Checker<"API">,
 def MacOSKeychainAPIChecker : Checker<"SecKeychainAPI">,
   HelpText<"Check for proper uses of Secure Keychain APIs">,
   Documentation<HasDocumentation>;
+
+def MIGChecker : Checker<"MIG">,
+  HelpText<"Find violations of the Mach Interface Generator "
+           "calling convention">,
+  Documentation<NotDocumented>;
 
 def ObjCPropertyChecker : Checker<"ObjCProperty">,
   HelpText<"Check for proper uses of Objective-C properties">,
@@ -1011,6 +1019,10 @@ def ExplodedGraphViewer : Checker<"ViewExplodedGraph">,
   HelpText<"View Exploded Graphs using GraphViz">,
   Documentation<NotDocumented>;
 
+def ReportStmts : Checker<"ReportStmts">,
+  HelpText<"Emits a warning for every statement.">,
+  Documentation<NotDocumented>;
+
 } // end "debug"
 
 
@@ -1037,3 +1049,15 @@ def UnixAPIPortabilityChecker : Checker<"UnixAPI">,
   Documentation<NotDocumented>;
 
 } // end optin.portability
+
+//===----------------------------------------------------------------------===//
+// NonDeterminism checkers.
+//===----------------------------------------------------------------------===//
+
+let ParentPackage = NonDeterminismAlpha in {
+
+def PointerSortingChecker : Checker<"PointerSorting">,
+  HelpText<"Check for non-determinism caused by sorting of pointers">,
+  Documentation<HasDocumentation>;
+
+} // end alpha.nondeterminism

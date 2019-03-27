@@ -105,13 +105,13 @@ struct SubobjectAdjustment {
 /// This represents one expression.  Note that Expr's are subclasses of Stmt.
 /// This allows an expression to be transparently used any place a Stmt is
 /// required.
-class Expr : public Stmt {
+class Expr : public ValueStmt {
   QualType TR;
 
 protected:
   Expr(StmtClass SC, QualType T, ExprValueKind VK, ExprObjectKind OK,
        bool TD, bool VD, bool ID, bool ContainsUnexpandedParameterPack)
-    : Stmt(SC)
+    : ValueStmt(SC)
   {
     ExprBits.TypeDependent = TD;
     ExprBits.ValueDependent = VD;
@@ -124,7 +124,7 @@ protected:
   }
 
   /// Construct an empty expression.
-  explicit Expr(StmtClass SC, EmptyShell) : Stmt(SC) { }
+  explicit Expr(StmtClass SC, EmptyShell) : ValueStmt(SC) { }
 
 public:
   QualType getType() const { return TR; }
@@ -794,7 +794,7 @@ public:
   /// IgnoreParens() + IgnoreImpCasts() until reaching a fixed point. However
   /// this is currently not the case. Instead IgnoreParenImpCasts() skips:
   /// * What IgnoreParens() skips
-  /// * ImplicitCastExpr
+  /// * What IgnoreImpCasts() skips
   /// * MaterializeTemporaryExpr
   /// * SubstNonTypeTemplateParmExpr
   Expr *IgnoreParenImpCasts() LLVM_READONLY;
@@ -2610,6 +2610,11 @@ public:
     NumArgs = NewNumArgs;
   }
 
+  /// Bluntly set a new number of arguments without doing any checks whatsoever.
+  /// Only used during construction of a CallExpr in a few places in Sema.
+  /// FIXME: Find a way to remove it.
+  void setNumArgsUnsafe(unsigned NewNumArgs) { NumArgs = NewNumArgs; }
+
   typedef ExprIterator arg_iterator;
   typedef ConstExprIterator const_arg_iterator;
   typedef llvm::iterator_range<arg_iterator> arg_range;
@@ -3397,6 +3402,9 @@ public:
 
   static bool isComparisonOp(Opcode Opc) { return Opc >= BO_Cmp && Opc<=BO_NE; }
   bool isComparisonOp() const { return isComparisonOp(getOpcode()); }
+
+  static bool isCommaOp(Opcode Opc) { return Opc == BO_Comma; }
+  bool isCommaOp() const { return isCommaOp(getOpcode()); }
 
   static Opcode negateComparisonOp(Opcode Opc) {
     switch (Opc) {
