@@ -2865,6 +2865,9 @@ defm Mstride0: BooleanMFlag<"stride0">, Group<pgi_fortran_Group>;
 defm Mrecursive: BooleanMFlag<"recursive">, Group<pgi_fortran_Group>;
 defm Mreentrant: BooleanMFlag<"reentrant">, Group<pgi_fortran_Group>;
 defm Mbounds: BooleanMFlag<"bounds">, Group<pgi_fortran_Group>;
+def Mwritable-constants:Flag<["-"], "Mwritable-constants">,
+  Group<pgi_fortran_Group>,
+  HelpText<"Store constants in the writable data segment">;
 def Mdaz_on: Flag<["-"], "Mdaz">, Group<pgi_fortran_Group>,
   HelpText<"Treat denormalized numbers as zero">;
 def Mdaz_off: Flag<["-"], "Mnodaz">, Group<pgi_fortran_Group>,
