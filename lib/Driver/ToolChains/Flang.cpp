@@ -141,7 +141,7 @@ void FlangFrontend::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Store constants in writable data segment
-  for (auto Arg : Args.filtered(options::OPT_Mwritable-constants)) {
+  for (auto Arg : Args.filtered(options::OPT_Mwritable_constants)) {
     Arg->claim();
     LowerCmdArgs.push_back("-x");
     LowerCmdArgs.push_back("183");
