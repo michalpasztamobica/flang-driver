@@ -2933,6 +2933,8 @@ def Mnomain: Flag<["-"], "Mnomain">, Group<pgi_fortran_Group>,
   HelpText<"Don't link in Fortran main">;
 def frelaxed_math : Flag<["-"], "frelaxed-math">, Group<pgi_fortran_Group>,
   HelpText<"Use relaxed Math intrinsic functions">;
+def Munixlogical: Flag<["-"], "Munixlogical">, Group<pgi_fortran_Group>,
+  HelpText<"Use unixlogical for all loigical operations">;
 
 // Flang internal debug options
 def Mx_EQ : Joined<["-"], "Mx,">, Group<pgi_fortran_Group>;
