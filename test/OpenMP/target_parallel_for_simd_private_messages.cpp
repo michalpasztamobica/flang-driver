@@ -1,8 +1,17 @@
-// RUN: %clang_cc1 -verify -fopenmp %s
+// RUN: %clang_cc1 -verify -fopenmp %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd %s
+// RUN: %clang_cc1 -verify -fopenmp-simd %s -Wuninitialized
 
-extern int omp_default_mem_alloc;
+typedef void **omp_allocator_handle_t;
+extern const omp_allocator_handle_t omp_default_mem_alloc;
+extern const omp_allocator_handle_t omp_large_cap_mem_alloc;
+extern const omp_allocator_handle_t omp_const_mem_alloc;
+extern const omp_allocator_handle_t omp_high_bw_mem_alloc;
+extern const omp_allocator_handle_t omp_low_lat_mem_alloc;
+extern const omp_allocator_handle_t omp_cgroup_mem_alloc;
+extern const omp_allocator_handle_t omp_pteam_mem_alloc;
+extern const omp_allocator_handle_t omp_thread_mem_alloc;
+
 void foo() {
 }
 
@@ -59,7 +68,7 @@ public:
 
   S6() : a(0) {}
   S6(T v) : a(v) {
-#pragma omp target parallel for simd private(a) private(this->a)
+#pragma omp target parallel for simd allocate(omp_thread_mem_alloc: a) private(a) private(this->a) // expected-warning {{allocator with the 'thread' trait access has unspecified behavior on 'target parallel for simd' directive}}
     for (int k = 0; k < v; ++k)
       ++this->a;
   }
@@ -97,7 +106,7 @@ template <class I, class C>
 int foomain(I argc, C **argv) {
   I e(4);
   I g(5);
-  int i;
+  int i, z;
   int &j = i;
 #pragma omp target parallel for simd private // expected-error {{expected '(' after 'private'}}
   for (int k = 0; k < argc; ++k)
@@ -129,7 +138,7 @@ int foomain(I argc, C **argv) {
 #pragma omp target parallel for simd private(argv[1]) // expected-error {{expected variable name}}
   for (int k = 0; k < argc; ++k)
     ++k;
-#pragma omp target parallel for simd private(e, g)
+#pragma omp target parallel for simd private(e, g, z)
   for (int k = 0; k < argc; ++k)
     ++k;
 #pragma omp target parallel for simd private(h) // expected-error {{threadprivate or thread local variable cannot be private}}
@@ -167,9 +176,9 @@ using A::x;
 int main(int argc, char **argv) {
   S4 e(4);
   S5 g(5);
-  S6<float> s6(0.0) , s6_0(1.0);
+  S6<float> s6(0.0) , s6_0(1.0); // expected-note {{in instantiation of member function 'S6<float>::S6' requested here}}
   S7<S6<float> > s7(0.0) , s7_0(1.0);
-  int i;
+  int i, z;
   int &j = i;
 #pragma omp target parallel for simd private // expected-error {{expected '(' after 'private'}}
   for (int k = 0; k < argc; ++k)
@@ -189,7 +198,7 @@ int main(int argc, char **argv) {
 #pragma omp target parallel for simd private(argc > 0 ? argv[1] : argv[2]) // expected-error {{expected variable name}}
   for (int k = 0; k < argc; ++k)
     ++k;
-#pragma omp target parallel for simd private(argc)
+#pragma omp target parallel for simd private(argc, z)
   for (int k = 0; k < argc; ++k)
     ++k;
 #pragma omp target parallel for simd private(S1) // expected-error {{'S1' does not refer to a value}}

@@ -1,8 +1,17 @@
-// RUN: %clang_cc1 -verify -fopenmp %s
+// RUN: %clang_cc1 -verify -fopenmp %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd %s
+// RUN: %clang_cc1 -verify -fopenmp-simd %s -Wuninitialized
 
-extern int omp_default_mem_alloc;
+typedef void **omp_allocator_handle_t;
+extern const omp_allocator_handle_t omp_default_mem_alloc;
+extern const omp_allocator_handle_t omp_large_cap_mem_alloc;
+extern const omp_allocator_handle_t omp_const_mem_alloc;
+extern const omp_allocator_handle_t omp_high_bw_mem_alloc;
+extern const omp_allocator_handle_t omp_low_lat_mem_alloc;
+extern const omp_allocator_handle_t omp_cgroup_mem_alloc;
+extern const omp_allocator_handle_t omp_pteam_mem_alloc;
+extern const omp_allocator_handle_t omp_thread_mem_alloc;
+
 void foo() {
 }
 
@@ -69,7 +78,7 @@ template <class I, class C>
 int foomain(int argc, char **argv) {
   I e(4);
   I g(5);
-  int i;
+  int i, z;
   int &j = i;
 #pragma omp parallel
 #pragma omp taskloop lastprivate // expected-error {{expected '(' after 'lastprivate'}}
@@ -112,7 +121,7 @@ int foomain(int argc, char **argv) {
   for (int k = 0; k < argc; ++k)
     ++k;
 #pragma omp parallel
-#pragma omp taskloop lastprivate(e, g) // expected-error 2 {{calling a private constructor of class 'S4'}}
+#pragma omp taskloop lastprivate(z, e, g) // expected-error 2 {{calling a private constructor of class 'S4'}}
   for (int k = 0; k < argc; ++k)
     ++k;
 #pragma omp parallel
@@ -123,7 +132,7 @@ int foomain(int argc, char **argv) {
   {
     int v = 0;
     int i;
-#pragma omp taskloop lastprivate(i)
+#pragma omp taskloop allocate(omp_thread_mem_alloc: i) lastprivate(i) // expected-warning {{allocator with the 'thread' trait access has unspecified behavior on 'taskloop' directive}}
     for (int k = 0; k < argc; ++k) {
       i = k;
       v += i;
@@ -163,7 +172,7 @@ int main(int argc, char **argv) {
   S5 g(5);
   S3 m;
   S6 n(2);
-  int i;
+  int i, z;
   int &j = i;
 #pragma omp parallel
 #pragma omp taskloop lastprivate // expected-error {{expected '(' after 'lastprivate'}}
@@ -190,7 +199,7 @@ int main(int argc, char **argv) {
   for (i = 0; i < argc; ++i)
     foo();
 #pragma omp parallel
-#pragma omp taskloop lastprivate(argc)
+#pragma omp taskloop lastprivate(argc, z)
   for (i = 0; i < argc; ++i)
     foo();
 #pragma omp parallel

@@ -138,7 +138,7 @@ the configuration (without a prefix: ``Auto``).
     <https://llvm.org/docs/CodingStandards.html>`_
   * ``Google``
     A style complying with `Google's C++ style guide
-    <http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml>`_
+    <https://google.github.io/styleguide/cppguide.html>`_
   * ``Chromium``
     A style complying with `Chromium's style guide
     <https://www.chromium.org/developers/coding-style>`_
@@ -191,6 +191,20 @@ the configuration (without a prefix: ``Auto``).
           argument1, argument2);
 
 
+
+**AlignConsecutiveMacros** (``bool``)
+  If ``true``, aligns consecutive C/C++ preprocessor macros.
+
+  This will align the C/C++ preprocessor macros of consecutive lines. This
+  will result in formattings like
+
+  .. code-block:: c++
+
+    #define SHORT_NAME       42
+    #define LONGER_NAME      0x007f
+    #define EVEN_LONGER_NAME (2)
+    #define foo(x)           (x * x)
+    #define bar(y, z)        (y + z)
 
 **AlignConsecutiveAssignments** (``bool``)
   If ``true``, aligns consecutive assignments.
@@ -407,47 +421,46 @@ the configuration (without a prefix: ``Auto``).
       };
       void f() { bar(); }
 
+
+
 **AllowShortIfStatementsOnASingleLine** (``ShortIfStyle``)
-  Dependent on the value, ``if (a) return 0;`` can be put on a
-  single line.
+  If ``true``, ``if (a) return;`` can be put on a single line.
 
   Possible values:
 
   * ``SIS_Never`` (in configuration: ``Never``)
-    Do not allow short if functions.
+    Never put short ifs on the same line.
 
     .. code-block:: c++
 
-       if (a)
-         return;
-       else
-         return;
+      if (a)
+        return ;
+      else {
+        return;
+      }
 
   * ``SIS_WithoutElse`` (in configuration: ``WithoutElse``)
-    Allow short if functions on the same line, as long as else
-    is not a compound statement.
+    Without else put short ifs on the same line only if
+    the else is not a compound statement.
 
     .. code-block:: c++
 
-       if (a) return;
-       else
-         return;
-
-       if (a)
-         return;
-       else {
-         return;
-       }
+      if (a) return;
+      else
+        return;
 
   * ``SIS_Always`` (in configuration: ``Always``)
-    Allow short if statements even if the else is a compound statement.
+    Always put short ifs on the same line if
+    the else is not a compound statement or not.
 
     .. code-block:: c++
 
-       if (a) return;
-       else {
-          return;
-       }
+      if (a) return;
+      else {
+        return;
+      }
+
+
 
 **AllowShortLambdasOnASingleLine** (``ShortLambdaStyle``)
   Dependent on the value, ``auto lambda []() { return 0; }`` can be put on a
@@ -704,6 +717,23 @@ the configuration (without a prefix: ``Auto``).
 
   Nested configuration flags:
 
+
+  * ``bool AfterCaseLabel`` Wrap case labels.
+
+    .. code-block:: c++
+
+      false:                                true:
+      switch (foo) {                vs.     switch (foo) {
+        case 1: {                             case 1:
+          bar();                              {
+          break;                                bar();
+        }                                       break;
+        default: {                            }
+          plop();                             default:
+        }                                     {
+      }                                         plop();
+                                              }
+                                            }
 
   * ``bool AfterClass`` Wrap class definitions.
 
@@ -1339,7 +1369,7 @@ the configuration (without a prefix: ``Auto``).
      true:                                  false:
      namespace a {                  vs.     namespace a {
      foo();                                 foo();
-     } // namespace a;                      }
+     } // namespace a                       }
 
 **ForEachMacros** (``std::vector<std::string>``)
   A vector of macros that should be interpreted as foreach loops
@@ -1359,6 +1389,24 @@ the configuration (without a prefix: ``Auto``).
     ForEachMacros: ['RANGES_FOR', 'FOREACH']
 
   For example: BOOST_FOREACH.
+
+**TypenameMacros** (``std::vector<std::string>``)
+  A vector of macros that should be interpreted as type declarations
+  instead of as function calls.
+
+  These are expected to be macros of the form:
+
+  .. code-block: c++
+
+    STACK_OF(...)
+
+  In the .clang-format configuration file, this can be configured like:
+
+  .. code-block: yaml
+
+    TypenameMacros: ['STACK_OF', 'LIST']
+
+  For example: OpenSSL STACK_OF, BSD LIST_ENTRY.
 
 **IncludeBlocks** (``IncludeBlocksStyle``)
   Dependent on the value, multiple ``#include`` blocks can be sorted
@@ -1502,6 +1550,7 @@ the configuration (without a prefix: ``Auto``).
            #include <foo>
          #endif
        #endif
+
 
 
 **IndentWidth** (``unsigned``)
@@ -1747,6 +1796,19 @@ the configuration (without a prefix: ``Auto``).
 
 
 
+**NamespaceMacros** (``std::vector<std::string>``)
+  A vector of macros which are used to open namespace blocks.
+
+  These are expected to be macros of the form:
+
+  .. code-block:: c++
+
+    NAMESPACE(<namespace-name>, ...) {
+      <namespace-content>
+    }
+
+  For example: TESTSUITE
+
 **ObjCBinPackProtocolList** (``BinPackStyle``)
   Controls bin-packing Objective-C protocol conformance list
   items into as few lines as possible when they go over ``ColumnLimit``.
@@ -1952,6 +2014,14 @@ the configuration (without a prefix: ``Auto``).
      true:                                  false:
      (int) i;                       vs.     (int)i;
 
+**SpaceAfterLogicalNot** (``bool``)
+  If ``true``, a space is inserted after the logical not operator (``!``).
+
+  .. code-block:: c++
+
+     true:                                  false:
+     ! someExpression();            vs.     !someExpression();
+
 **SpaceAfterTemplateKeyword** (``bool``)
   If ``true``, a space will be inserted after the 'template' keyword.
 
@@ -2025,6 +2095,19 @@ the configuration (without a prefix: ``Auto``).
            f();
          }
        }
+
+  * ``SBPO_NonEmptyParentheses`` (in configuration: ``NonEmptyParentheses``)
+    Put a space before opening parentheses only if the parentheses are not
+    empty i.e. '()'
+
+    .. code-block:: c++
+
+      void() {
+        if (true) {
+          f();
+          g (x, y, z);
+        }
+      }
 
   * ``SBPO_Always`` (in configuration: ``Always``)
     Always put a space before opening parentheses, except when it's

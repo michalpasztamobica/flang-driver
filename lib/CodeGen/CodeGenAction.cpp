@@ -15,6 +15,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclGroup.h"
 #include "clang/Basic/FileManager.h"
+#include "clang/Basic/LangStandard.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/BackendUtil.h"
@@ -262,34 +263,37 @@ namespace clang {
           Ctx.getDiagnosticHandler();
       Ctx.setDiagnosticHandler(llvm::make_unique<ClangDiagnosticHandler>(
         CodeGenOpts, this));
-      Ctx.setDiagnosticsHotnessRequested(CodeGenOpts.DiagnosticsWithHotness);
-      if (CodeGenOpts.DiagnosticsHotnessThreshold != 0)
-        Ctx.setDiagnosticsHotnessThreshold(
-            CodeGenOpts.DiagnosticsHotnessThreshold);
 
-      std::unique_ptr<llvm::ToolOutputFile> OptRecordFile;
-      if (!CodeGenOpts.OptRecordFile.empty()) {
-        std::error_code EC;
-        OptRecordFile = llvm::make_unique<llvm::ToolOutputFile>(
-            CodeGenOpts.OptRecordFile, EC, sys::fs::F_None);
-        if (EC) {
-          Diags.Report(diag::err_cannot_open_file) <<
-            CodeGenOpts.OptRecordFile << EC.message();
-          return;
-        }
+      Expected<std::unique_ptr<llvm::ToolOutputFile>> OptRecordFileOrErr =
+          setupOptimizationRemarks(Ctx, CodeGenOpts.OptRecordFile,
+                                   CodeGenOpts.OptRecordPasses,
+                                   CodeGenOpts.OptRecordFormat,
+                                   CodeGenOpts.DiagnosticsWithHotness,
+                                   CodeGenOpts.DiagnosticsHotnessThreshold);
 
-        Ctx.setRemarkStreamer(llvm::make_unique<RemarkStreamer>(
-            CodeGenOpts.OptRecordFile, OptRecordFile->os()));
-
-        if (!CodeGenOpts.OptRecordPasses.empty())
-          if (Error E = Ctx.getRemarkStreamer()->setFilter(
-                  CodeGenOpts.OptRecordPasses))
-            Diags.Report(diag::err_drv_optimization_remark_pattern)
-                << toString(std::move(E)) << CodeGenOpts.OptRecordPasses;
-
-        if (CodeGenOpts.getProfileUse() != CodeGenOptions::ProfileNone)
-          Ctx.setDiagnosticsHotnessRequested(true);
+      if (Error E = OptRecordFileOrErr.takeError()) {
+        handleAllErrors(
+            std::move(E),
+            [&](const RemarkSetupFileError &E) {
+              Diags.Report(diag::err_cannot_open_file)
+                  << CodeGenOpts.OptRecordFile << E.message();
+            },
+            [&](const RemarkSetupPatternError &E) {
+              Diags.Report(diag::err_drv_optimization_remark_pattern)
+                  << E.message() << CodeGenOpts.OptRecordPasses;
+            },
+            [&](const RemarkSetupFormatError &E) {
+              Diags.Report(diag::err_drv_optimization_remark_format)
+                  << CodeGenOpts.OptRecordFormat;
+            });
+        return;
       }
+      std::unique_ptr<llvm::ToolOutputFile> OptRecordFile =
+          std::move(*OptRecordFileOrErr);
+
+      if (OptRecordFile &&
+          CodeGenOpts.getProfileUse() != CodeGenOptions::ProfileNone)
+        Ctx.setDiagnosticsHotnessRequested(true);
 
       // Link each LinkModule into our module.
       if (LinkInModules())
@@ -558,13 +562,13 @@ const FullSourceLoc BackendConsumer::getBestLocationFromDebugLoc(
   if (D.isLocationAvailable()) {
     D.getLocation(Filename, Line, Column);
     if (Line > 0) {
-      const FileEntry *FE = FileMgr.getFile(Filename);
+      auto FE = FileMgr.getFile(Filename);
       if (!FE)
         FE = FileMgr.getFile(D.getAbsolutePath());
       if (FE) {
         // If -gcolumn-info was not used, Column will be 0. This upsets the
         // source manager, so pass 1 if Column is not set.
-        DILoc = SourceMgr.translateFileLineCol(FE, Line, Column ? Column : 1);
+        DILoc = SourceMgr.translateFileLineCol(*FE, Line, Column ? Column : 1);
       }
     }
     BadDebugInfo = DILoc.isInvalid();
@@ -943,7 +947,8 @@ static void BitcodeInlineAsmDiagHandler(const llvm::SMDiagnostic &SM,
   Diags->Report(DiagID).AddString("cannot compile inline asm");
 }
 
-std::unique_ptr<llvm::Module> CodeGenAction::loadModule(MemoryBufferRef MBRef) {
+std::unique_ptr<llvm::Module>
+CodeGenAction::loadModule(MemoryBufferRef MBRef) {
   CompilerInstance &CI = getCompilerInstance();
   SourceManager &SM = CI.getSourceManager();
 
@@ -1010,7 +1015,7 @@ std::unique_ptr<llvm::Module> CodeGenAction::loadModule(MemoryBufferRef MBRef) {
 
 void CodeGenAction::ExecuteAction() {
   // If this is an IR file, we have to treat it specially.
-  if (getCurrentFileKind().getLanguage() == InputKind::LLVM_IR) {
+  if (getCurrentFileKind().getLanguage() == Language::LLVM_IR) {
     BackendAction BA = static_cast<BackendAction>(Act);
     CompilerInstance &CI = getCompilerInstance();
     std::unique_ptr<raw_pwrite_stream> OS =
@@ -1021,7 +1026,7 @@ void CodeGenAction::ExecuteAction() {
     bool Invalid;
     SourceManager &SM = CI.getSourceManager();
     FileID FID = SM.getMainFileID();
-    llvm::MemoryBuffer *MainFile = SM.getBuffer(FID, &Invalid);
+    const llvm::MemoryBuffer *MainFile = SM.getBuffer(FID, &Invalid);
     if (Invalid)
       return;
 

@@ -45,7 +45,6 @@ add_clang_library(clangStaticAnalyzerCore
   SValBuilder.cpp
   SVals.cpp
   SymbolManager.cpp
-  TaintManager.cpp
   WorkList.cpp
 
   LINK_LIBS
@@ -54,6 +53,7 @@ add_clang_library(clangStaticAnalyzerCore
   clangAnalysis
   clangBasic
   clangCrossTU
+  clangFrontend
   clangLex
   clangRewrite
   )

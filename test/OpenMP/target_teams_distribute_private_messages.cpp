@@ -1,8 +1,17 @@
-// RUN: %clang_cc1 -verify -fopenmp %s
+// RUN: %clang_cc1 -verify -fopenmp %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd %s
+// RUN: %clang_cc1 -verify -fopenmp-simd %s -Wuninitialized
 
-extern int omp_default_mem_alloc;
+typedef void **omp_allocator_handle_t;
+extern const omp_allocator_handle_t omp_default_mem_alloc;
+extern const omp_allocator_handle_t omp_large_cap_mem_alloc;
+extern const omp_allocator_handle_t omp_const_mem_alloc;
+extern const omp_allocator_handle_t omp_high_bw_mem_alloc;
+extern const omp_allocator_handle_t omp_low_lat_mem_alloc;
+extern const omp_allocator_handle_t omp_cgroup_mem_alloc;
+extern const omp_allocator_handle_t omp_pteam_mem_alloc;
+extern const omp_allocator_handle_t omp_thread_mem_alloc;
+
 void foo() {
 }
 
@@ -83,7 +92,7 @@ int main(int argc, char **argv) {
 #pragma omp target teams distribute private (argv[1]) // expected-error {{expected variable name}}
   for (int k = 0; k < argc; ++k) ++k;
 
-#pragma omp target teams distribute private(ba)
+#pragma omp target teams distribute private(ba) allocate(omp_thread_mem_alloc: ba) // expected-warning {{allocator with the 'thread' trait access has unspecified behavior on 'target teams distribute' directive}}
   for (int k = 0; k < argc; ++k) ++k;
 
 #pragma omp target teams distribute private(ca) // expected-error {{const-qualified variable without mutable fields cannot be private}}
