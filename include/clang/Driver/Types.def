@@ -67,6 +67,12 @@ TYPE("objective-c++-header",     ObjCXXHeader, PP_ObjCXXHeader, "h",      phases
 TYPE("c++-module",               CXXModule,    PP_CXXModule,    "cppm",   phases::Preprocess, phases::Precompile, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("c++-module-cpp-output",    PP_CXXModule, INVALID,         "iim",    phases::Precompile, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 
+// Fortran
+TYPE("f77",                      PP_F_FixedForm, INVALID,       "f",   "u")
+TYPE("f77-cpp-input",            F_FixedForm,  PP_F_FixedForm,  "F",   "u")
+TYPE("f95",                      PP_F_FreeForm, INVALID,        "f95", "u")
+TYPE("f95-cpp-input",            F_FreeForm,   PP_F_FreeForm,   "F95", "u")
+
 // Other languages.
 TYPE("ada",                      Ada,          INVALID,         nullptr,  phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("assembler",                PP_Asm,       INVALID,         "s",      phases::Assemble, phases::Link)
