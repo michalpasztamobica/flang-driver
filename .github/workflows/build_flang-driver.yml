@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        target: [X86, AArch64, PowerPC]
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so the job can access it
+      - uses: actions/checkout@v2
+      
+      - name: Check tools
+        run: |
+          git --version
+          cmake --version
+          make --version
+          gcc --version
+
+      - name: Build llvm
+        run: |
+          CMAKE_OPTIONS="-DLLVM_TARGETS_TO_BUILD=${{ matrix.target }}"
+          git clone --depth 1 --single-branch --branch release_90 https://github.com/flang-compiler/llvm.git
+          cd llvm
+          mkdir -p build && cd build
+          cmake $CMAKE_OPTIONS -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc-9 -DCMAKE_CXX_COMPILER=/usr/bin/g++-9 ..
+          make -j$(nproc)
+          # Install so the flang-driver can be built
+          sudo make install
+          
+          # Archive the build directory for future installation
+          cd ..
+          tar -zcvf llvm_build.tar.gz build
+          mv llvm_build.tar.gz ../
+
+      - name: Build flang-driver
+        run: |
+          CMAKE_OPTIONS="-DLLVM_TARGETS_TO_BUILD=${{ matrix.target }}"
+          git checkout release_90
+          mkdir -p build && cd build
+          cmake $CMAKE_OPTIONS -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc-9 -DCMAKE_CXX_COMPILER=/usr/bin/g++-9 ..
+          make -j$(nproc)
+          # Install so the OpenMP can be built
+          sudo make install
+          
+          # Archive the build directory for future installation
+          cd ..
+          tar -zcvf flang-driver_build.tar.gz build
+          mv  flang-driver_build.tar.gz ../
+      
+      - name: Upload flang-driver
+        uses: actions/upload-artifact@v2
+        with:
+          name: flang-driver_build_${{ matrix.target }}
+          path: flang-driver_build.tar.gz
